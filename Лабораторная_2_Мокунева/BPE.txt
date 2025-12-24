@@ -1,0 +1,96 @@
+class BPE:
+    def __init__(self, vocab_size: int):
+        self.vocab_size = vocab_size
+        self.id2token = None
+        self.token2id = None
+    
+    def fit(self, text: str):
+        # уникальные токены
+        unique_tokens = sorted(set(text))
+        text_tokens = list(text)
+
+        while len(unique_tokens) < self.vocab_size:
+            # Подсчет частот пар
+            pairs = {}
+            for i in range(len(text_tokens) - 1):
+                pair = (text_tokens[i], text_tokens[i + 1])
+                if pair not in pairs:
+                    pairs[pair] = 0
+                pairs[pair] += 1
+            
+            if not pairs:
+                break  # если пар больше нет
+            
+            # Находим самую частую пару 
+            max_pair = None
+            max_freq = 0
+            for pair, freq in pairs.items():
+                if freq > max_freq:
+                    max_freq = freq
+                    max_pair = pair
+            
+            # Создаем новый токен
+            new_token = max_pair[0] + max_pair[1]
+            unique_tokens.append(new_token)
+            
+            # Объединяем пары в последовательности
+            i = 0
+            new_text_tokens = []
+            while i < len(text_tokens):
+                if (i < len(text_tokens) - 1 and 
+                    text_tokens[i] == max_pair[0] and 
+                    text_tokens[i + 1] == max_pair[1]):
+                    new_text_tokens.append(new_token)
+                    i += 2
+                else:
+                    new_text_tokens.append(text_tokens[i])
+                    i += 1
+            text_tokens = new_text_tokens
+        
+        # 4. Создаем словари
+        self.id2token = {i: token for i, token in enumerate(unique_tokens[:self.vocab_size])}
+        self.token2id = {token: i for i, token in self.id2token.items()}
+
+    def encode(self, text: str):
+
+        # Начинаем с разбиения на символы
+        tokens = list(text)
+        
+        changed = True
+        while changed:
+            changed = False
+            new_tokens = []
+            i = 0
+            while i < len(tokens):
+                if i < len(tokens) - 1:
+                    # Проверяем, есть ли объединенная пара в словаре
+                    pair = tokens[i] + tokens[i + 1]
+                    if pair in self.token2id:
+                        new_tokens.append(pair)
+                        i += 2
+                        changed = True
+                    else:
+                        new_tokens.append(tokens[i])
+                        i += 1
+                else:
+                    new_tokens.append(tokens[i])
+                    i += 1
+            tokens = new_tokens
+        
+        # Преобразуем токены в идентификаторы
+        ids = []
+        for token in tokens:
+            if token in self.token2id:
+                ids.append(self.token2id[token])
+            else:
+                # Если токен не найден, разбиваем на символы
+                for char in token:
+                    if char in self.token2id:
+                        ids.append(self.token2id[char])
+                    else:
+                        # Если символ тоже не найден, используем первый доступный токен
+                        ids.append(0)
+        return ids
+    
+    def decode(self, ids: list):
+        return ''.join(self.id2token[i] for i in ids)

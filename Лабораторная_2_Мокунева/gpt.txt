@@ -1,0 +1,154 @@
+import numpy as np
+class HeadAttention(nn.Module):
+    def __init__(self, emb_size: int, head_size: int, max_seq_len: int):
+        super().__init__()
+        self.emb_size = emb_size
+        self.head_size = head_size
+        self.max_seq_len = max_seq_len
+        self.w_k = nn.Linear(emb_size, head_size)
+        self.w_q = nn.Linear(emb_size, head_size)
+        self.w_v = nn.Linear(emb_size, head_size)
+        self.mask_attention = torch.tril(torch.ones(max_seq_len, max_seq_len))
+        
+    def forward(self, x):
+        seq_len = x.shape[1]
+
+        self.key_matrix = self.w_k(x)
+        self.query_matrix = self.w_q(x)
+        self.value_matrix = self.w_v(x)
+        self.attention_matrix = torch.matmul(self.query_matrix, self.key_matrix.transpose(1, 2))
+        self.attention_matrix /= np.sqrt(self.head_size)
+        self.mask_matrix = self.mask_attention[:seq_len, :seq_len]
+        self.attention_matrix = torch.where(self.mask_matrix == 1, self.attention_matrix, torch.tensor(float('-inf'), device=self.attention_matrix.device, dtype=self.attention_matrix.dtype))
+       
+        self.attention_matrix = torch.softmax(self.attention_matrix, dim=2)
+
+        self.out = torch.matmul(self.attention_matrix, self.value_matrix)
+
+
+        return self.out
+    
+class MultiHeadAttention(nn.Module):
+    def __init__(self, num_heads: int, emb_size: int, head_size: int, max_seq_len: int, dropout: float = 0.1):
+        super().__init__()
+        self.num_heads = num_heads
+        self.emb_size = emb_size
+        self.head_size = head_size
+        self.max_seq_len = max_seq_len
+
+        self.heads = nn.ModuleList([HeadAttention(emb_size, head_size, max_seq_len) for i in range(num_heads)])
+        self.linear = nn.Linear(head_size * num_heads, emb_size)
+        self.drop = torch.nn.Dropout(p=dropout)
+
+    def forward(self, x):
+        head_output = []
+        for head in self.heads:
+            head_out = head(x)
+            head_output.append(head_out)
+
+        concat = torch.cat(head_output, dim=2)
+        res_linear = self.linear(concat)
+        output = self.drop(res_linear)
+
+        return output
+
+class FeedForward(nn.Module):
+    def __init__(self, emb_size: int, dropout: float = 0.1):
+        super().__init__()
+        self.emb_size = emb_size
+
+        self.l1 = nn.Linear(self.emb_size, 4 * self.emb_size)
+        self.relu = nn.ReLU()
+        self.l2 = nn.Linear(4 * self.emb_size, self.emb_size)
+        self.drop = torch.nn.Dropout(p=dropout)
+
+    def forward(self, x):
+
+        x_l1 = self.l1(x)
+        x_relu = self.relu(x_l1)
+        x_l2 = self.l2(x_relu)
+        x_drop = self.drop(x_l2)
+
+        return x_drop
+    
+class Decoder(nn.Module):
+    def __init__(self, num_heads:int, emb_size:int, head_size:int, max_seq_len: int, dropout: float=0.1):
+        super().__init__()
+        self.multi_head = MultiHeadAttention(num_heads=num_heads,
+        emb_size=emb_size, head_size=head_size, max_seq_len=max_seq_len, dropout=dropout)
+
+        self.feed_forward = FeedForward(emb_size=emb_size, dropout=dropout)
+
+        self.ln1 = torch.nn.LayerNorm(emb_size)
+        self.ln2 = torch.nn.LayerNorm(emb_size)
+        
+    def forward (self, x):
+        x_multi = self.multi_head(x)
+        x_sum1 = x_multi + x
+        x_ln1 = self.ln1(x_sum1)
+        x_ffn = self.feed_forward(x_ln1)
+        x_sum2 = x_ffn + x_ln1
+        x_ln2 = self.ln2(x_sum2)
+        return x_ln2
+    
+class TokenEmbeddings(nn.Module):
+    def __init__(self, vocab_size: int, emb_size: int):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.emb_size = emb_size
+
+        self.matrix_emb = nn.Embedding(vocab_size, emb_size)
+
+    def forward(self, x: torch.Tensor):
+
+        output = self.matrix_emb(x)
+        
+        return output
+    
+class PositionalEmbeddings(nn.Module):
+    def __init__(self, max_seq_len: int, emb_size: int):
+        super().__init__()
+        self.max_seq_len = max_seq_len
+        self.emb_size = emb_size
+
+        self.matrix_emb = nn.Embedding(max_seq_len, emb_size)
+
+    def forward(self, seq_len):
+
+        output = self.matrix_emb(torch.arange(0, seq_len))
+        
+        return output
+    
+class GPT(nn.Module):
+    def __init__(self, vocab_size: int, max_seq_len: int, emb_size: int, num_heads: int, head_size: int, num_layers: int, dropout: float=0.1, device: str='cpu'):
+        super().__init__()
+
+        self.vocab_size = vocab_size
+        self.max_seq_len = max_seq_len
+        self.emb_size = emb_size
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.device = device
+        self.num_layers = num_layers
+
+        self.token_emb = TokenEmbeddings(vocab_size, emb_size)
+        self.positional_emb = PositionalEmbeddings(max_seq_len, emb_size)
+        self.drop = nn.Dropout(p=dropout)
+        decoder_layers = []
+        for _ in range(self.num_layers):
+            decoder_layer = Decoder(num_heads, emb_size, head_size, max_seq_len, dropout)
+            decoder_layers.append(decoder_layer)
+        
+        self.decoder_layers = nn.Sequential(*decoder_layers)
+        self.ln = nn.Linear(emb_size, vocab_size)
+
+    def forward(self, x):
+
+        x_token = self.token_emb(x)
+        x_positional = self.positional_emb(x.shape[1])
+        x_res = x_token + x_positional
+        x_drop = self.drop(x_res)
+        x_decoder = self.decoder_layers(x_drop)
+        x_ln = self.ln(x_decoder)
+
+        return x_ln 

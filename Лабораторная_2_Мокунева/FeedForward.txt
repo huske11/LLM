@@ -1,0 +1,18 @@
+class FeedForward(nn.Module):
+    def __init__(self, emb_size: int, dropout: float = 0.1):
+        super().__init__()
+        self.emb_size = emb_size
+
+        self.l1 = nn.Linear(self.emb_size, 4 * self.emb_size)
+        self.relu = nn.ReLU()
+        self.l2 = nn.Linear(4 * self.emb_size, self.emb_size)
+        self.drop = torch.nn.Dropout(p=dropout)
+
+    def forward(self, x):
+
+        x_l1 = self.l1(x)
+        x_relu = self.relu(x_l1)
+        x_l2 = self.l2(x_relu)
+        x_drop = self.drop(x_l2)
+
+        return x_drop

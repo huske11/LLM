@@ -1,0 +1,29 @@
+import numpy as np
+class HeadAttention(nn.Module):
+    def __init__(self, emb_size: int, head_size: int, max_seq_len: int):
+        super().__init__()
+        self.emb_size = emb_size
+        self.head_size = head_size
+        self.max_seq_len = max_seq_len
+        self.w_k = nn.Linear(emb_size, head_size)
+        self.w_q = nn.Linear(emb_size, head_size)
+        self.w_v = nn.Linear(emb_size, head_size)
+        self.mask_attention = torch.tril(torch.ones(max_seq_len, max_seq_len))
+        
+    def forward(self, x):
+        seq_len = x.shape[1]
+
+        self.key_matrix = self.w_k(x)
+        self.query_matrix = self.w_q(x)
+        self.value_matrix = self.w_v(x)
+        self.attention_matrix = torch.matmul(self.query_matrix, self.key_matrix.transpose(1, 2))
+        self.attention_matrix /= np.sqrt(self.head_size)
+        self.mask_matrix = self.mask_attention[:seq_len, :seq_len]
+        self.attention_matrix = torch.where(self.mask_matrix == 1, self.attention_matrix, torch.tensor(float('-inf'), device=self.attention_matrix.device, dtype=self.attention_matrix.dtype))
+       
+        self.attention_matrix = torch.softmax(self.attention_matrix, dim=2)
+
+        self.out = torch.matmul(self.attention_matrix, self.value_matrix)
+
+
+        return self.out
